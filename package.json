@@ -1,0 +1,9 @@
+{
+  "name": "observedts",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "description": "A Typescript webframework based on events",
+  "author": "Stijn",
+  "license": "ISC"
+}
