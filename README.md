@@ -19,18 +19,10 @@ function start(): App
 To add pages to your app there's the page function. This function takes in a path and a Page provider (Which can be lazily loaded).
 
 ```TS
-function page(path: string, page: (() => Page)): App
-```
-
-```TS
-function page(path: string, page: Lazy<Promise<{ default: (() => Page)}>>): App
+function page(path: string, loader: RouteLoader, navGuard?: NavGuard): App
 ```
 
 There is also the ability to add navguards to the routing which can allow, prevent or redirect the current routing.
-
-```TS
-navGuard?: (route: string, params: {[key: string]: string}) => boolean | string
-```
 
 ### Example
 A simple single page.
@@ -50,21 +42,21 @@ const app = createApp(root, {}) //Create the app and attach it to the body
 To create a basic element you use the create function.
 
 ```TS
-function create(
-    type: keyof HTMLElementTagNameMap, 
-    attributes: {[key: string]: Stringable | ObservedStringable}, 
-    ...nodes: AcceptedNodes[]
-)
+function create<K extends keyof HTMLElementTagNameMap>(
+  type: K,
+  attributes: Record<string, AttrValue> = {},
+  ...nodes: DomChild[]
+): HTMLElementTagNameMap[K];
 ```
 
 To create elements for an svg there is the createSVG function.
 
 ```TS
-function createSVG(
-    type: keyof SVGElementTagNameMap, 
-    attributes: {[key: string]: Stringable | ObservedStringable}, 
-    ...nodes: AcceptedNodes[]
-)
+function createSVG<K extends keyof SVGElementTagNameMap>(
+  type: K,
+  attributes: Record<string, AttrValue> = {},
+  ...nodes: DomChild[]
+): SVGElementTagNameMap[K];
 ```
 
 ### Example
@@ -158,16 +150,16 @@ container.swap(container2)
 You can use the foreach function to instantiate a template for each element in the array.
 
 ```TS
-export function foreach<T>(
-    arr: Observed<T[]>, 
-    template: ((
-        index: () => number, 
-        get: () => T, 
-        set: (val: T | undefined) => void, 
-        notify: () => void, 
-        subscribe: (fn: ((value: T) => boolean | void), 
-        clean?: () => void) => void
-    ) => Container)
+export function foreach<T, K>(
+  arr: Observed<T[]>,
+  key: (item: T, index: number) => K,
+  template: (api: {
+    index: () => number;
+    get: () => T;
+    set: (val: T | undefined) => void;
+    notify: () => void;
+    subscribe: (fn: (value: T) => void | boolean, cleanup?: () => void) => void;
+  }) => Container
 ): Container;
 ```
 
@@ -176,9 +168,9 @@ The template instance has access to the same functions as a normal observed vari
 ### Example
 
 ```TS
-foreach(nav, (_, g) => container(
+foreach(nav, (_, index) => index, (api) => container(
     create('li', {class: "relative mt-6"},
-        create("h2", {class: "text-xs font-semibold text-zinc-900 dark:text-white"}, g().name),
+        create("h2", {class: "text-xs font-semibold text-zinc-900 dark:text-white"}, api.get().name),
         create("ul", {role: "list", class: "relative mt-3 ml-2 space-y-3 lg:space-y-2 border-l"},
             ...
         )
@@ -191,17 +183,17 @@ foreach(nav, (_, g) => container(
 There is a conditional function that helps you create a container which is only visible when the condition is met.
 
 ```TS
-function conditional(condition: Observed<boolean>, ...nodes: AcceptedNodes[]);
+function conditional(condition: Observed<boolean>, ...nodes: DomChild[]): Container;
 ```
 
 There is a createTransition funtion that helps create a conditional container with a smooth animation.
 
 ```TS
- function createTransition(
-    options: transitionOptions,
-    type: keyof HTMLElementTagNameMap, 
-    attributes: {[key: string]: Stringable | ObservedStringable}, 
-    ...nodes: AcceptedNodes[]
+function createTransition<K extends keyof HTMLElementTagNameMap>(
+  options: TransitionOptions,
+  type: K,
+  attributes: Record<string, AttrValue> = {},
+  ...nodes: DomChild[]
 )
 ```
 
