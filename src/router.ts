@@ -1,4 +1,4 @@
-import { Page } from "./app";
+import type { Page } from "./app";
 import { Lazy } from "./util";
 
 export type RouteLoader =

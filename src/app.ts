@@ -1,10 +1,8 @@
-import { Container } from "./container";
-import type { DomChild } from "./types";
 import { LruCache, Lazy } from "./util";
 import { appendNode } from "./dom";
 import { resolveRoute, type RouteLoader, type NavGuard } from "./router";
 import type { Cleaner } from "./observed";
-import type { Ref } from "./container";
+import type { JsxChild } from "./jsx";
 
 export interface PageOptions {
   beforeMount?: () => void;
@@ -15,13 +13,11 @@ export interface PageOptions {
 
 export interface Page {
   options: PageOptions;
-  frag: Container;
+  children: JsxChild;
 }
 
-export function page(options: PageOptions, ...nodes: DomChild[]): Page {
-  const frag = new Container();
-  frag.add(...nodes);
-  return { options, frag };
+export function page(options: PageOptions, children: JsxChild): Page {
+  return { options, children };
 }
 
 export interface AppConfig {
@@ -34,9 +30,8 @@ export class App {
   private pages = new LruCache<string, Page>();
 
   private current?: Page;
-  private currentRoute?: string;
   private currentParams: Record<string, string> = {};
-  private cleaner?: Cleaner<(Node | Ref)[]>;
+  private cleaner?: Cleaner;
 
   constructor(private readonly root: HTMLElement, private readonly config: AppConfig = {}) {}
 
@@ -112,22 +107,20 @@ export class App {
     if (!this.current) return;
 
     this.current.options.beforeUnmount?.call(this.root);
-    this.cleaner?.execute(this.root);
+    this.cleaner?.execute();
     this.current.options.afterUnmount?.call(this.root);
 
     this.cleaner = undefined;
     this.current = undefined;
-    this.currentRoute = undefined;
     this.currentParams = {};
   }
 
   private mount(route: string, page: Page, params: Record<string, string>): void {
     this.current = page;
-    this.currentRoute = route;
     this.currentParams = params;
 
     page.options.beforeMount?.call(this.root);
-    this.cleaner = appendNode(this.root, page.frag);
+    this.cleaner = appendNode(this.root, page.children);
     page.options.afterMount?.call(this.root);
   }
 

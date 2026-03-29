@@ -1,22 +1,26 @@
-import { Container } from "./container";
-import { Cleaner, Observed } from "./observed";
+import { Observed, Cleaner } from "./observed";
+import type { JsxChild } from "./jsx";
 
 type ForeachApi<T> = {
   index: () => number;
   get: () => T;
-  set: (val: T) => void;     // undefined => remove entry
-  remove: () => void;                    // convenience
-  notify: () => void;                    // force re-render / re-run subscribers
+  set: (val: T) => void;
+  remove: () => void;
+  notify: () => void;
   subscribe: (fn: (value: T) => void | boolean, cleanup?: () => void) => void;
+  map<U>(fn: (value: T) => U): Observed<U>;
 };
 
-export function foreach<T, K>(
-  arr: Observed<T[]>,
-  key: (item: T, index: number) => K,
-  template: (api: ForeachApi<T>) => Container
-): Container {
-  // We return a stable "root" that holds children + an anchor comment.
-  const root = new Container();
+type ForProps<T, K> = {
+  each: Observed<T[]>;
+  key: (item: T, index: number) => K;
+  children: (api: ForeachApi<T>) => JsxChild;
+};
+
+export function For<T, K>(props: ForProps<T, K>): JsxChild {
+  const { each: arr, key, children: template } = props;
+
+  const rendered = new Observed<JsxChild[]>([]);
 
   const removeByIndex = (idx: number) => {
     const a = arr.get();
@@ -34,7 +38,8 @@ export function foreach<T, K>(
 
   type ItemState = {
     k: K;
-    cleaners: Cleaner<any>[];
+    view: JsxChild;
+    cleaners: Cleaner[];
   };
 
   const byKey = new Map<K, ItemState>();
@@ -42,18 +47,19 @@ export function foreach<T, K>(
   const reconcile = () => {
     const a = arr.get();
 
-    // Compute next ordering by key
     const nextKeys: K[] = new Array(a.length);
-    for (let i = 0; i < a.length; i++) nextKeys[i] = key(a[i], i);
+    for (let i = 0; i < a.length; i++) {
+      nextKeys[i] = key(a[i], i);
+    }
 
-    // Create missing states
     for (let i = 0; i < a.length; i++) {
       const k = nextKeys[i];
       if (byKey.has(k)) continue;
 
       const st: ItemState = {
         k,
-        cleaners: []
+        view: null,
+        cleaners: [],
       };
 
       const getIndex = () => {
@@ -66,50 +72,82 @@ export function foreach<T, K>(
 
       const api: ForeachApi<T> = {
         index: () => getIndex(),
+
         get: () => {
           const idx = getIndex();
           const cur = arr.get();
           return cur[idx];
         },
+
         set: (val) => {
           const idx = getIndex();
           if (idx === -1) return;
           setByIndex(idx, val);
         },
+
         remove: () => {
           const idx = getIndex();
           if (idx === -1) return;
           removeByIndex(idx);
         },
+
         notify: () => arr.notify(),
+
         subscribe: (fn, cleanup) => {
-          st.cleaners.push(arr.subscribe((val) => fn(val[getIndex()]), cleanup))
+          const cleaner = arr.subscribe((value) => {
+            const idx = getIndex();
+            if (idx === -1) return;
+            return fn(value[idx]);
+          }, cleanup);
+
+          st.cleaners.push(cleaner);
+        },
+
+        map: <U,>(fn: (value: T) => U) => {
+          const idx = getIndex();
+          const cur = arr.get();
+          const o = new Observed(fn(cur[idx]));
+
+          const cleaner = arr.subscribe((value) => {
+            const i = getIndex();
+            if (i === -1) return;
+            o.set(fn(value[i]));
+          });
+
+          st.cleaners.push(cleaner);
+          return o;
         },
       };
 
-      const node = template(api);
-      st.cleaners.push(root.addContainer(node))
-
+      st.view = template(api);
       byKey.set(k, st);
     }
 
     for (const [k, st] of byKey) {
-      // key is gone if it doesn't appear in nextKeys
-      // O(n) check is fine for small lists; for big lists use a Set(nextKeys)
       let exists = false;
       for (let i = 0; i < nextKeys.length; i++) {
-        if (nextKeys[i] === k) { exists = true; break; }
+        if (nextKeys[i] === k) {
+          exists = true;
+          break;
+        }
       }
+
       if (!exists) {
-        st.cleaners.forEach(c => c.execute(root));
+        for (const cleaner of st.cleaners) {
+          cleaner.execute();
+        }
         st.cleaners.length = 0;
         byKey.delete(k);
       }
     }
+
+    rendered.set(nextKeys.map((k) => byKey.get(k)!.view));
   };
 
   arr.subscribe(() => reconcile());
   reconcile();
 
-  return root;
+  const a = <div ></div>
+
+  return <>{rendered}</>;
 }

@@ -1,3 +1,5 @@
+import { VFragment, VIntrinsic } from "./jsx";
+
 const globalStore = new Map<string, any>();
 
 export function store<T = any>(key: string): T | undefined;
@@ -50,4 +52,23 @@ export class LruCache<K, V> {
       this.map.delete(k);
     }
   }
+}
+
+export function isNode(value: any): value is Node {
+  if (!value || typeof value !== "object") return false;
+  const view = value.ownerDocument?.defaultView;
+  return !!view && value instanceof view.Node;
+}
+
+export function isPrimitive(value: unknown): value is string | number | boolean | symbol {
+  const t = typeof value;
+  return t === "string" || t === "number" || t === "boolean" || t === "symbol";
+}
+
+export function isVIntrinsic(value: unknown): value is VIntrinsic {
+  return !!value && typeof value === "object" && (value as VIntrinsic).kind === "intrinsic";
+}
+
+export function isVFragment(value: unknown): value is VFragment {
+  return !!value && typeof value === "object" && (value as VFragment).kind === "fragment";
 }

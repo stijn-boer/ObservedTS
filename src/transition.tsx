@@ -1,7 +1,10 @@
 import { observed, Observed } from "./observed";
-import { create } from "./create";
-import type { AttrValue, DomChild } from "./types";
-import { Container } from "./container";
+import type {
+  BaseProps,
+  CreateAttributes,
+  IntrinsicTag,
+  JsxChild,
+} from "./jsx";
 
 export interface TransitionOptions {
   show: Observed<boolean>;
@@ -13,7 +16,6 @@ export interface TransitionOptions {
   leaveTo: string;
 
   children?: Observed<number>;
-  chilren?: Observed<number>;
 
   beforeOpen?: () => void;
   afterOpen?: () => void;
@@ -21,11 +23,23 @@ export interface TransitionOptions {
   afterClose?: () => void;
 }
 
+type ConditionalProps = {
+  when: Observed<boolean>;
+  children?: JsxChild | JsxChild[];
+};
+
+type TransitionProps<K extends IntrinsicTag> = {
+  as: K;
+  options: TransitionOptions;
+  attributes?: CreateAttributes;
+  children?: JsxChild | JsxChild[];
+};
+
 function nextFrame(fn: () => void) {
   requestAnimationFrame(() => requestAnimationFrame(fn));
 }
 
-/** Returns the *max* (delay+duration) across all transition entries, in ms. */
+/** Returns the max (delay + duration) across all transition entries, in ms. */
 function getTransitionMs(el: Element): number {
   const cs = getComputedStyle(el);
 
@@ -34,7 +48,6 @@ function getTransitionMs(el: Element): number {
     if (!v) return 0;
     if (v.endsWith("ms")) return Number.parseFloat(v);
     if (v.endsWith("s")) return Number.parseFloat(v) * 1000;
-    // sometimes browsers return "0" without unit
     const n = Number.parseFloat(v);
     return Number.isFinite(n) ? n : 0;
   };
@@ -51,7 +64,6 @@ function getTransitionMs(el: Element): number {
     max = Math.max(max, d + l);
   }
 
-  // if transition-property is "none", treat as no transition
   if (cs.transitionProperty === "none") return 0;
 
   return max;
@@ -62,9 +74,17 @@ function runTransition(
   setClass: (cls: string) => void,
   from: string,
   to: string,
-  done: () => void
+  done: () => void,
 ) {
   let finished = false;
+  let timer: number | null = null;
+
+  const cleanup = () => {
+    el.removeEventListener("transitionend", onEnd);
+    el.removeEventListener("transitioncancel", onEnd);
+    if (timer != null) clearTimeout(timer);
+  };
+
   const finish = () => {
     if (finished) return;
     finished = true;
@@ -73,148 +93,120 @@ function runTransition(
   };
 
   const onEnd = (ev: Event) => {
-    // Only treat events from the element itself (not bubbling from children)
     if (ev.target !== el) return;
     finish();
   };
 
-  const cleanup = () => {
-    el.removeEventListener("transitionend", onEnd);
-    el.removeEventListener("transitioncancel", onEnd);
-    if (timer != null) clearTimeout(timer);
-  };
-
-  // Start in "from" state
   setClass(from);
 
-  // Force the browser to acknowledge the "from" styles before switching to "to".
-  // (Reading offsetHeight triggers layout.)
-  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+  // Force layout
   el.offsetHeight;
 
-  // Switch to "to" in next frame for reliable transitions
   nextFrame(() => {
     setClass(to);
 
     const ms = getTransitionMs(el);
     if (ms <= 0) {
-      // No transition -> complete immediately (but after we've applied "to")
       finish();
       return;
     }
 
     el.addEventListener("transitionend", onEnd);
     el.addEventListener("transitioncancel", onEnd);
-
-    // Fallback: in case transitionend never fires
     timer = window.setTimeout(finish, ms + 50);
   });
-
-  let timer: number | null = null;
 }
 
-export function createTransition<K extends keyof HTMLElementTagNameMap>(
-  options: TransitionOptions,
-  type: K,
-  attributes: Record<string, AttrValue> = {},
-  ...nodes: DomChild[]
-) {
-  const children = options.children;
+export function Conditional(props: ConditionalProps): JsxChild {
+  const rendered = props.when.map((s) => s ? props.children ?? [] : []);
+  return <>{rendered}</>;
+}
+
+export function Transition<K extends IntrinsicTag>(props: TransitionProps<K>): JsxChild {
+  const { as, options } = props;
+  const attrs: BaseProps = { ...(props.attributes ?? {}) };
 
   const active = observed(options.show.get());
   const wantsActive = observed(options.show.get());
 
-  const baseClass =
-    attributes.class instanceof Observed
-      ? attributes.class
-      : observed(attributes.class ? (attributes.class as any) : "");
+  const baseClass = attrs.class;
 
   const transitionClass = observed(
     options.show.get()
       ? `${options.enter} ${options.enterTo}`
-      : `${options.leave} ${options.leaveTo}`
+      : `${options.leave} ${options.leaveTo}`,
   );
 
-  const mergedClass = observed(`${baseClass.get()} ${transitionClass.get()}`.trim());
-  const recompute = () => mergedClass.set(`${baseClass.get()} ${transitionClass.get()}`.trim());
-  baseClass.subscribe(recompute);
-  transitionClass.subscribe(recompute);
+  const ref = observed<Element | undefined>(undefined);
 
-  attributes.class = mergedClass;
-
-  const el = create(type, attributes, ...nodes) as HTMLElement;
-
-  // Helper: only touch transitionClass via one place
-  const setTrans = (cls: string) => transitionClass.set(cls);
+  attrs.class = (baseClass == null) ? transitionClass : [baseClass, transitionClass];
+  attrs.ref = ref;
 
   wantsActive.subscribe((state) => {
-    if (!state && children && children.get() > 0) return;
+    if (!state && options.children && options.children.get() > 0) return;
     active.set(state);
   });
 
-  if (children) {
-    children.subscribe((n) => {
-      if (n < 1 && !wantsActive.get()) active.set(false);
+  if (options.children) {
+    options.children.subscribe((n) => {
+      if (n < 1 && !wantsActive.get()) {
+        active.set(false);
+      }
     });
   }
 
   options.show.subscribe((state) => {
-    // OPEN
     if (state && !active.get()) {
       options.beforeOpen?.();
 
       wantsActive.set(true);
       active.set(true);
 
+      const el = ref.get();
+      if (!el || !(el instanceof HTMLElement)) return;
+
       runTransition(
         el,
-        setTrans,
+        (cls) => transitionClass.set(cls),
         `${options.enter} ${options.enterFrom}`,
         `${options.enter} ${options.enterTo}`,
-        () => options.afterOpen?.()
+        () => options.afterOpen?.(),
       );
 
       return;
     }
 
-    // CLOSE
     if (!state && active.get()) {
       options.beforeClose?.();
 
+      const el = ref.get();
+      if (!el || !(el instanceof HTMLElement)) return;
+
       runTransition(
         el,
-        setTrans,
+        (cls) => transitionClass.set(cls),
         `${options.leave} ${options.leaveFrom}`,
         `${options.leave} ${options.leaveTo}`,
         () => {
           wantsActive.set(false);
           options.afterClose?.();
-        }
+        },
       );
-
-      return;
     }
   });
 
-  return conditional(active, el);
-}
+  const node = {
+    kind: "intrinsic" as const,
+    type: as,
+    props: attrs,
+    children: props.children ?? [],
+  };
 
-export function conditional(condition: Observed<boolean>, ...nodes: DomChild[]): Container {
-  const placeholder = document.createComment("conditional");
-  const hidden = new Container();
-  const shown = new Container();
-
-  hidden.add(placeholder);
-  shown.add(...nodes);
-
-  if (!condition.get()) shown.swap(hidden);
-
-  let isShown = condition.get();
-  condition.subscribe((next) => {
-    if (next === isShown) return;
-    shown.swap(hidden);
-    isShown = next;
-  });
-
-  return shown;
+  return (
+    <Conditional when={active}>
+      <>
+        {node}
+      </>
+    </Conditional>
+  );
 }
