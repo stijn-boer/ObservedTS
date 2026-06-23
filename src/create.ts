@@ -2,6 +2,7 @@ import { appendNode } from "./dom";
 import { Observed } from "./observed";
 import type { AttrValue,  EventHandler, VIntrinsic, Namespace, StyleValue, StyleObject, Stringable, ObservedStringable } from "./jsx";
 import { HTML_NS, SVG_NS, MATH_NS } from "./jsx";
+import { ContextMap } from "./context";
 
 function getChildNamespace(parentNs: Namespace, tag: string, parentTag?: string): Namespace {
   if (parentNs === HTML_NS) {
@@ -225,6 +226,7 @@ export function renderIntrinsic(
   vnode: VIntrinsic,
   parentNs: Namespace,
   parentTag?: string,
+  contextMap: ContextMap = new Map(),
 ): Element {
   const ns = getChildNamespace(parentNs, vnode.type, parentTag);
 
@@ -235,7 +237,7 @@ export function renderIntrinsic(
 
   applyAttributes(el, vnode.props);
 
-  appendNode(el, vnode.children, ns, vnode.type);
+  appendNode(el, vnode.children, ns, vnode.type, contextMap);
 
   return el;
 }

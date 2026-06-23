@@ -1,4 +1,4 @@
-import { VFragment, VIntrinsic } from "./jsx";
+import { VComponent, VContextProvider, VFragment, VIntrinsic } from "./jsx";
 
 const globalStore = new Map<string, any>();
 
@@ -71,4 +71,12 @@ export function isVIntrinsic(value: unknown): value is VIntrinsic {
 
 export function isVFragment(value: unknown): value is VFragment {
   return !!value && typeof value === "object" && (value as VFragment).kind === "fragment";
+}
+
+export function isVComponent(value: unknown): value is VComponent<{}> {
+    return !!value && typeof value === "object" && (value as VComponent<{}>).kind === "component";
+}
+
+export function isVContextProvider(value: unknown): value is VContextProvider<any> {
+  return !!value && typeof value === "object" && (value as VContextProvider<any>).kind === "context_provider";
 }

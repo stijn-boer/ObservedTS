@@ -1,13 +1,13 @@
+import { ContextMap, withContextMap } from "./context";
 import { renderIntrinsic } from "./create";
 import {
   HTML_NS,
   type JsxChild,
   type Namespace,
-  type VFragment,
-  type VIntrinsic,
 } from "./jsx";
+import { createLifecycleScope, runAfterUnmountLifecycle, runBeforeUnmountLifecycle, runMountLifecycle, withLifecycleScope } from "./lifecycle";
 import { Cleaner, Observed } from "./observed";
-import { isNode, isPrimitive, isVFragment, isVIntrinsic } from "./util";
+import { isNode, isPrimitive, isVComponent, isVContextProvider, isVFragment, isVIntrinsic } from "./util";
 
 export function toNode(input: Node | string | number | boolean | symbol): Node {
   if (isNode(input)) return input;
@@ -23,9 +23,10 @@ function noop() {}
 
 function combineCleaners(cleaners: Array<Cleaner>): Cleaner {
   if (cleaners.length === 0) return new Cleaner(noop);
+
   return new Cleaner(() => {
-    for (const c of cleaners) {
-      c.execute()
+    for (let i = cleaners.length - 1; i >= 0; i--) {
+      cleaners[i].execute();
     }
   });
 }
@@ -45,6 +46,7 @@ function appendIntoRange(
   child: JsxChild,
   parentNs: Namespace,
   parentTag?: string,
+  contextMap: ContextMap = new Map(),
 ): Cleaner {
   if (child == null) {
     return new Cleaner(noop);
@@ -52,12 +54,60 @@ function appendIntoRange(
 
   if (Array.isArray(child)) {
     return combineCleaners(
-      child.map((c) => appendIntoRange(parent, before, c, parentNs, parentTag)),
+      child.map((c) => appendIntoRange(parent, before, c, parentNs, parentTag, contextMap)),
     );
   }
 
   if (isVFragment(child)) {
-    return appendIntoRange(parent, before, child.children, parentNs, parentTag);
+    return appendIntoRange(parent, before, child.children, parentNs, parentTag, contextMap);
+  }
+
+  if (isVComponent(child)) {
+    const scope = createLifecycleScope();
+
+    const rendered = withContextMap(contextMap, () => {
+      return withLifecycleScope(scope, () => {
+        return child.component(child.props);
+      });
+    });
+
+    let renderedDispose = new Cleaner(noop);
+
+    try {
+      renderedDispose = appendIntoRange(
+        parent,
+        before,
+        rendered,
+        parentNs,
+        parentTag,
+        contextMap
+      );
+
+      runMountLifecycle(scope);
+    } catch (err) {
+      renderedDispose.execute();
+      throw err;
+    }
+
+    return new Cleaner(() => {
+      runBeforeUnmountLifecycle(scope);
+      renderedDispose.execute();
+      runAfterUnmountLifecycle(scope);
+    });
+  }
+
+  if (isVContextProvider(child)) {
+    const nextContextMap = new Map(contextMap);
+    nextContextMap.set(child.context.id, child.value);
+
+    return appendIntoRange(
+      parent,
+      before,
+      child.children,
+      parentNs,
+      parentTag,
+      nextContextMap,
+    );
   }
 
   if (child instanceof Observed) {
@@ -72,7 +122,7 @@ function appendIntoRange(
     const remount = (value: JsxChild) => {
       innerDispose.execute();
       clearBetween(parent, start, end);
-      innerDispose = appendIntoRange(parent, end, value, parentNs, parentTag);
+      innerDispose = appendIntoRange(parent, end, value, parentNs, parentTag, contextMap);
     };
 
     remount(child.get() as JsxChild);
@@ -93,7 +143,7 @@ function appendIntoRange(
   }
 
   if (isVIntrinsic(child)) {
-    const c = renderIntrinsic(child, parentNs, parentTag);
+    const c = renderIntrinsic(child, parentNs, parentTag, contextMap);
     parent.insertBefore(c, before);
     return new Cleaner(() => {
       parent.removeChild(c);
@@ -116,13 +166,14 @@ export function appendNode(
   child: JsxChild,
   parentNs: Namespace = HTML_NS,
   parentTag?: string,
+  contextMap: ContextMap = new Map(),
 ): Cleaner {
 
   if (!isNode(parent)) {
     throw new Error("Parent isn't a node!");
   }
 
-  return appendIntoRange(parent, null, child, parentNs, parentTag);
+  return appendIntoRange(parent, null, child, parentNs, parentTag, contextMap);
 }
 
 export function debounce<F extends (...args: any[]) => void>(fn: F, timeout = 300) {

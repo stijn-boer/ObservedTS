@@ -48,10 +48,14 @@ export function jsx<P>(
   }
 
   if (typeof type === "function") {
-    return type({
-      ...(attrs as P),
-      children: normalizedChildren,
-    });
+    return {
+      kind: "component",
+      component: type,
+      props: {
+        ...(attrs as P),
+        children: normalizedChildren,
+      }
+    }
   }
 
   return {

@@ -21,6 +21,8 @@ export type VFragment = {
 export type JsxChild =   
     | VIntrinsic
     | VFragment
+    | VComponent<any>
+    | VContextProvider<any>
     | Node
     | string 
     | number 
@@ -31,6 +33,8 @@ export type JsxChild =
     | JsxChild[]
     | Observed<VIntrinsic>
     | Observed<VFragment>
+    | Observed<VComponent<any>>
+    | Observed<VContextProvider<any>>
     | Observed<Node>
     | Observed<string> 
     | Observed<number> 
@@ -81,7 +85,6 @@ export type MathTag = keyof MathMLElementTagNameMap;
 export type IntrinsicTag = HtmlTag | SvgTag | MathTag;
 
 type EventMap = HTMLElementEventMap & SVGElementEventMap;
-type A = HTMLElementTagNameMap
 
 type EventProps = {
     [K in keyof EventMap as `on${K}`]?: (ev: EventMap[K]) => any;
@@ -123,6 +126,29 @@ type ComponentChildren = {
     children?: JsxChild | JsxChild[];
 };
 
-export type Component<P = {}> = (props: P & ComponentChildren) => any;
+export type Component<P = {}> = (props: P & ComponentChildren & EventProps) => JsxChild;
+
+export type VComponent<P> = {
+    kind: "component";
+    component: Component<P>;
+    props: P & ComponentChildren;
+};
+
+export type VContextProvider<T> = {
+  kind: "context_provider";
+  context: VContext<T>;
+  value: T;
+  children: JsxChild;
+};
+
+export type VContext<T> = {
+  id: symbol
+};
+
+export type Context<T> = {
+  Provider: (props: { value: T; children?: JsxChild }) => VContextProvider<T>;
+  use(): T;
+  tryUse(): T | undefined;
+};
 
 export {};
